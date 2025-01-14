@@ -1,14 +1,10 @@
+#include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/_types/_socklen_t.h>
-#include <sys/_types/_ssize_t.h>
-#include <sys/_types/_u_int8_t.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 enum {
@@ -18,53 +14,59 @@ enum {
 
 void check(int e, const char *context) {
   if (e < 0) {
-    printf("%s failed: %s\n", context, strerror(errno));
+    fprintf(stderr, "%s failed: %s\n", context, strerror(errno));
     exit(EXIT_FAILURE);
   }
 }
 
-void *recieve_messages(void *arg) {
+void *receive_messages(void *arg) {
   int client_fd = *(int *)arg;
   char buffer[1024];
-  memset(buffer, 0, 1024);
   while (1) {
     ssize_t size = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     if (size <= 0)
       break;
     buffer[size] = '\0';
-    printf(">>%s", buffer);
+    printf(">> %s", buffer);
   }
-  exit(EXIT_SUCCESS);
+  return NULL;
 }
 
 int main(int argc, char **argv) {
-  int client_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (argc < 2) {
-    perror("./client <addr> <port>\n");
+  if (argc < 3) {
+    fprintf(stderr, "Usage: %s <addr> <port>\n", argv[0]);
+    exit(EXIT_FAILURE);
   }
 
-  struct sockaddr_in server_info = {
-      .sin_family = AF_INET,
-      .sin_addr = htonl(atoi(argv[ADDRESS])),
-      .sin_port = htons(atoi(argv[PORT])),
-  };
+  int client_fd = socket(AF_INET, SOCK_STREAM, 0);
+  check(client_fd, "socket");
 
-  check(connect(client_fd, (const struct sockaddr *)&server_info,
-                sizeof(server_info)),
-        "connect");
+  struct sockaddr_in server_info = {0};
+  server_info.sin_family = AF_INET;
+  check(inet_pton(AF_INET, argv[ADDRESS], &server_info.sin_addr), "inet_pton");
+  server_info.sin_port = htons(atoi(argv[PORT]));
+
+  check(
+      connect(client_fd, (struct sockaddr *)&server_info, sizeof(server_info)),
+      "connect");
 
   pthread_t recv_thread;
-  pthread_create(&recv_thread, NULL, recieve_messages, &client_fd);
+  check(pthread_create(&recv_thread, NULL, receive_messages, &client_fd),
+        "pthread_create");
 
   char msg[256];
-  while (1) {
-    fgets(msg, sizeof(msg), stdin);
+  while (fgets(msg, sizeof(msg), stdin)) {
+    if (strcmp(msg, "exit\n") == 0)
+      break;
     ssize_t size = send(client_fd, msg, strlen(msg), 0);
     if (size < 0) {
-      printf("Send failed: %s\n", strerror(errno));
+      fprintf(stderr, "Send failed: %s\n", strerror(errno));
       break;
     }
   }
 
+  pthread_cancel(recv_thread);
+  pthread_join(recv_thread, NULL);
   close(client_fd);
+  return 0;
 }

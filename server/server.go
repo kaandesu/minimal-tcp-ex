@@ -132,6 +132,5 @@ func (s *Server) handleMessages() {
 }
 
 func main() {
-	server := NewServer("127.1:3000")
-	server.Start()
+	NewServer("127.1:3000").Start()
 }
